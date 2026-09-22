@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import SwiftUI
+import UserNotifications
 
 final class AppRomanticaState: ObservableObject {
     let baseURL = URL(string: "https://api-romantica.onrender.com")!
@@ -23,6 +24,31 @@ final class AppRomanticaState: ObservableObject {
     @Published var mensajes: [Mensaje] = []
     @Published var fotos: [Foto] = []
     @Published var estaOnlineOtroUsuario = false
+
+    // Variables de control para las notificaciones locales simuladas
+    private var ultimoMensajeCount: Int = -1
+    private var ultimosContadoresLocal: [String: Int] = [:]
+    private var ultimaFotoCount: Int = -1
+    private var ultimoEstadoStr: String = ""
+    private var ultimoAvisoOnline: Date? = nil
+    private var estabaOnline: Bool = false
+
+    init() {
+        // Pedir permiso para notificaciones locales
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
+            print("Permiso de notificaciones locales: \(granted)")
+        }
+    }
+
+    private func mostrarNotificacionLocal(titulo: String, cuerpo: String) {
+        let content = UNMutableNotificationContent()
+        content.title = titulo
+        content.body = cuerpo
+        content.sound = .default
+
+        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request)
+    }
 
     func guardarRol(_ rol: String) {
         UserDefaults.standard.set(rol, forKey: "rol_usuario")
@@ -95,11 +121,41 @@ final class AppRomanticaState: ObservableObject {
             let url = baseURL.appendingPathComponent("contadores")
             let (data, _) = try await URLSession.shared.data(from: url)
             let decoded = try JSONDecoder().decode(ContadoresApi.self, from: data)
-            contadores["te_extrano"] = decoded.te_extrano ?? 0
-            contadores["toma_agua"] = decoded.toma_agua ?? 0
-            contadores["te_amo"] = decoded.te_amo ?? 0
-            contadores["buen_dia"] = decoded.buen_dia ?? 0
-            contadores["te_admira"] = decoded.te_admira ?? 0
+
+            let nuevos = [
+                "te_extrano": decoded.te_extrano ?? 0,
+                "toma_agua": decoded.toma_agua ?? 0,
+                "te_amo": decoded.te_amo ?? 0,
+                "buen_dia": decoded.buen_dia ?? 0,
+                "te_admira": decoded.te_admira ?? 0
+            ]
+
+            // Verificar si hay cambios para la notificación
+            if !ultimosContadoresLocal.isEmpty {
+                var cambios: [String] = []
+                let nombresLegibles = [
+                    "te_extrano": "te extraño",
+                    "toma_agua": "toma agua",
+                    "te_amo": "te amo",
+                    "buen_dia": "buenos días",
+                    "te_admira": "te admira"
+                ]
+
+                for (clave, valor) in nuevos {
+                    let viejo = ultimosContadoresLocal[clave] ?? 0
+                    if valor > viejo {
+                        cambios.append("\(valor - viejo) \(nombresLegibles[clave] ?? clave)")
+                    }
+                }
+
+                if !cambios.isEmpty {
+                    let otroRol = (role == "juan_carlos" ? "Roro" : "Juan Carlos")
+                    mostrarNotificacionLocal(titulo: "Nuevos contadores ❤️", cuerpo: "\(otroRol) te dio \(cambios.joined(separator: ", "))")
+                }
+            }
+
+            ultimosContadoresLocal = nuevos
+            contadores = nuevos
         } catch {
             print("Error cargando contadores: \(error)")
         }
@@ -136,7 +192,16 @@ final class AppRomanticaState: ObservableObject {
         do {
             let url = baseURL.appendingPathComponent("mensajes")
             let (data, _) = try await URLSession.shared.data(from: url)
-            mensajes = try JSONDecoder().decode([Mensaje].self, from: data)
+            let lista = try JSONDecoder().decode([Mensaje].self, from: data)
+
+            // Si hay mensajes nuevos, notificar el último (si no es mío)
+            if ultimoMensajeCount != -1 && lista.count > ultimoMensajeCount {
+                if let ultimo = lista.last, ultimo.remitente != role {
+                    mostrarNotificacionLocal(titulo: "Nuevo mensaje de \(ultimo.remitente.capitalized) 💌", cuerpo: ultimo.texto)
+                }
+            }
+            ultimoMensajeCount = lista.count
+            mensajes = lista
         } catch {
             print("Error cargando mensajes: \(error)")
         }
@@ -177,7 +242,15 @@ final class AppRomanticaState: ObservableObject {
         do {
             let url = baseURL.appendingPathComponent("fotos")
             let (data, _) = try await URLSession.shared.data(from: url)
-            fotos = try JSONDecoder().decode([Foto].self, from: data)
+            let lista = try JSONDecoder().decode([Foto].self, from: data)
+
+            // Notificar si hay foto nueva
+            if ultimaFotoCount != -1 && lista.count > ultimaFotoCount {
+                let otroRol = (role == "juan_carlos" ? "Roro" : "Juan Carlos")
+                mostrarNotificacionLocal(titulo: "Nueva foto 📸", cuerpo: "\(otroRol) ha subido un recuerdo")
+            }
+            ultimaFotoCount = lista.count
+            fotos = lista
         } catch {
             print("Error cargando fotos: \(error)")
         }
@@ -210,8 +283,6 @@ final class AppRomanticaState: ObservableObject {
                 throw URLError(.badServerResponse)
             }
             await cargarFotos()
-        } catch {
-            print("Error subiendo foto: \(error)")
     @MainActor
     func enviarPingYRevisarOnline() async {
         guard let myRole = role else { return }
@@ -222,6 +293,69 @@ final class AppRomanticaState: ObservableObject {
             let urlPing = baseURL.appendingPathComponent("ping")
             var reqPing = URLRequest(url: urlPing)
             reqPing.httpMethod = "POST"
+            reqPing.setValue(myRole, forHTTPHeaderField: "X-Usuario")
+            _ = try? await URLSession.shared.data(for: reqPing)
+
+            // 2. Preguntar si el otro está online
+            let urlOnline = baseURL.appendingPathComponent("online/\(otroRol)")
+            let (dataOnline, _) = try await URLSession.shared.data(from: urlOnline)
+            let status = try JSONDecoder().decode(StatusOnline.self, from: dataOnline)
+            estaOnlineOtroUsuario = status.online
+
+            // Notificar si se acaba de conectar
+            if estaOnlineOtroUsuario && !estabaOnline {
+                let ahora = Date()
+                if ultimoAvisoOnline == nil || ahora.timeIntervalSince(ultimoAvisoOnline!) > (30 * 60) {
+                    mostrarNotificacionLocal(titulo: "¡Está en línea! 💚", cuerpo: "\(otroRol.capitalized) se acaba de conectar.")
+                    ultimoAvisoOnline = ahora
+                }
+            }
+            estabaOnline = estaOnlineOtroUsuario
+
+            // 3. Revisar estado emocional
+            let urlEstado = baseURL.appendingPathComponent("estado/\(otroRol)")
+            let (dataEstado, _) = try await URLSession.shared.data(from: urlEstado)
+            let estadoRemoto = try JSONDecoder().decode(EstadoRemoto.self, from: dataEstado)
+            let act = estadoRemoto.animo + estadoRemoto.estres
+            if act != ultimoEstadoStr && !ultimoEstadoStr.isEmpty {
+                mostrarNotificacionLocal(titulo: "Cambio de estado", cuerpo: "\(otroRol.capitalized) se siente \(estadoRemoto.animo) y \(estadoRemoto.estres)")
+            }
+            ultimoEstadoStr = act
+
+        } catch {
+            print("Error en ping/online: \(error)")
+        }
+    }
+
+    @MainActor
+    func subirEstadoEmocional(animo: String, estres: String) async -> Bool {
+        guard let myRole = role else { return false }
+
+        do {
+            let url = baseURL.appendingPathComponent("estado")
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
+
+            let body: [String: String] = [
+                "usuario": myRole,
+                "animo": animo,
+                "estres": estres
+            ]
+            request.httpBody = try JSONEncoder().encode(body)
+
+            let (_, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse,
+                  (200...299).contains(http.statusCode) else {
+                return false
+            }
+            return true
+        } catch {
+            print("Error subiendo estado: \(error)")
+            return false
+        }
+    }
+}
             reqPing.setValue(myRole, forHTTPHeaderField: "X-Usuario")
             _ = try? await URLSession.shared.data(for: reqPing)
 
