@@ -22,6 +22,16 @@ struct ContentView: View {
             await appState.cargarContadores()
             await appState.cargarMensajes()
             await appState.cargarFotos()
+
+            // Loop en segundo plano (emula el PollService de Android)
+            while !Task.isCancelled {
+                if appState.role != nil {
+                    await appState.enviarPingYRevisarOnline()
+                    await appState.cargarContadores()
+                    await appState.cargarMensajes()
+                }
+                try? await Task.sleep(nanoseconds: 10_000_000_000) // 10 segundos
+            }
         }
     }
 }

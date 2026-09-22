@@ -16,10 +16,13 @@ final class AppRomanticaState: ObservableObject {
     @Published var contadores: [String: Int] = [
         "te_extrano": 0,
         "toma_agua": 0,
-        "te_amo": 0
+        "te_amo": 0,
+        "buen_dia": 0,
+        "te_admira": 0
     ]
     @Published var mensajes: [Mensaje] = []
     @Published var fotos: [Foto] = []
+    @Published var estaOnlineOtroUsuario = false
 
     func guardarRol(_ rol: String) {
         UserDefaults.standard.set(rol, forKey: "rol_usuario")
@@ -92,9 +95,11 @@ final class AppRomanticaState: ObservableObject {
             let url = baseURL.appendingPathComponent("contadores")
             let (data, _) = try await URLSession.shared.data(from: url)
             let decoded = try JSONDecoder().decode(ContadoresApi.self, from: data)
-            contadores["te_extrano"] = decoded.te_extrano
-            contadores["toma_agua"] = decoded.toma_agua
-            contadores["te_amo"] = decoded.te_amo
+            contadores["te_extrano"] = decoded.te_extrano ?? 0
+            contadores["toma_agua"] = decoded.toma_agua ?? 0
+            contadores["te_amo"] = decoded.te_amo ?? 0
+            contadores["buen_dia"] = decoded.buen_dia ?? 0
+            contadores["te_admira"] = decoded.te_admira ?? 0
         } catch {
             print("Error cargando contadores: \(error)")
         }
@@ -106,6 +111,12 @@ final class AppRomanticaState: ObservableObject {
             let url = baseURL.appendingPathComponent("contadores/\(tipo)")
             var request = URLRequest(url: url)
             request.httpMethod = "POST"
+
+            // Añadir el Header UTF-8 y el usuario
+            request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
+            if let userRole = role {
+                request.setValue(userRole, forHTTPHeaderField: "X-Usuario")
+            }
 
             let (data, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse,
@@ -140,7 +151,7 @@ final class AppRomanticaState: ObservableObject {
             let url = baseURL.appendingPathComponent("mensajes")
             var request = URLRequest(url: url)
             request.httpMethod = "POST"
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
 
             let body: [String: String] = [
                 "texto": limpio,
@@ -187,6 +198,9 @@ final class AppRomanticaState: ObservableObject {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        if let userRole = role {
+            request.setValue(userRole, forHTTPHeaderField: "X-Usuario")
+        }
         request.httpBody = body
 
         do {
@@ -198,6 +212,57 @@ final class AppRomanticaState: ObservableObject {
             await cargarFotos()
         } catch {
             print("Error subiendo foto: \(error)")
+    @MainActor
+    func enviarPingYRevisarOnline() async {
+        guard let myRole = role else { return }
+        let otroRol = myRole == "juan_carlos" ? "roro" : "juan_carlos"
+
+        do {
+            // 1. Enviar ping
+            let urlPing = baseURL.appendingPathComponent("ping")
+            var reqPing = URLRequest(url: urlPing)
+            reqPing.httpMethod = "POST"
+            reqPing.setValue(myRole, forHTTPHeaderField: "X-Usuario")
+            _ = try? await URLSession.shared.data(for: reqPing)
+
+            // 2. Preguntar si el otro está online
+            let urlOnline = baseURL.appendingPathComponent("online/\(otroRol)")
+            let (data, _) = try await URLSession.shared.data(from: urlOnline)
+            let status = try JSONDecoder().decode(StatusOnline.self, from: data)
+
+            // Actualizamos la variable de estado
+            estaOnlineOtroUsuario = status.online
+        } catch {
+            print("Error en ping/online: \(error)")
+        }
+    }
+
+    @MainActor
+    func subirEstadoEmocional(animo: String, estres: String) async -> Bool {
+        guard let myRole = role else { return false }
+
+        do {
+            let url = baseURL.appendingPathComponent("estado")
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
+
+            let body: [String: String] = [
+                "usuario": myRole,
+                "animo": animo,
+                "estres": estres
+            ]
+            request.httpBody = try JSONEncoder().encode(body)
+
+            let (_, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse,
+                  (200...299).contains(http.statusCode) else {
+                return false
+            }
+            return true
+        } catch {
+            print("Error subiendo estado: \(error)")
+            return false
         }
     }
 }

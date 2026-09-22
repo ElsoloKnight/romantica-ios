@@ -29,6 +29,17 @@ struct MenuView: View {
                             Task { await appState.incrementarContador("te_amo") }
                         }
                     }
+
+                    // Segunda fila de contadores
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+                        ContadorCard(emoji: "🌞", titulo: "Buenos días", valor: appState.contadores["buen_dia"] ?? 0) {
+                            Task { await appState.incrementarContador("buen_dia") }
+                        }
+
+                        ContadorCard(emoji: "😍", titulo: "Te admira", valor: appState.contadores["te_admira"] ?? 0) {
+                            Task { await appState.incrementarContador("te_admira") }
+                        }
+                    }
                 }
 
                 VStack(alignment: .leading, spacing: 14) {
@@ -42,6 +53,10 @@ struct MenuView: View {
 
                     BotonRecuerdo(emoji: "💌", texto: "Buzón de Mensajes") {
                         appState.pantallaActual = .buzon
+                    }
+
+                    BotonRecuerdo(emoji: "😊", texto: "Estado Emocional") {
+                        appState.pantallaActual = .estadoEstres
                     }
                 }
 

@@ -17,13 +17,26 @@ struct Foto: Decodable, Identifiable {
 }
 
 struct ContadoresApi: Decodable {
-    let te_extrano: Int
-    let toma_agua: Int
-    let te_amo: Int
+    let te_extrano: Int?
+    let toma_agua: Int?
+    let te_amo: Int?
+    let buen_dia: Int?
+    let te_admira: Int?
 }
 
 struct NuevoValor: Decodable {
     let nuevo_valor: Int
+}
+
+struct EstadoRemoto: Decodable {
+    let usuario: String
+    let animo: String
+    let estres: String
+}
+
+struct StatusOnline: Decodable {
+    let usuario: String
+    let online: Bool
 }
 
 enum PantallaApp: String {
