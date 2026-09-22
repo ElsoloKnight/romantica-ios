@@ -282,7 +282,13 @@ final class AppRomanticaState: ObservableObject {
                   (200...299).contains(http.statusCode) else {
                 throw URLError(.badServerResponse)
             }
+            myLastPhotoUpload = true
             await cargarFotos()
+        } catch {
+            print("Error subiendo foto: \(error)")
+        }
+    }
+
     @MainActor
     func enviarPingYRevisarOnline() async {
         guard let myRole = role else { return }
@@ -322,50 +328,6 @@ final class AppRomanticaState: ObservableObject {
             }
             ultimoEstadoStr = act
 
-        } catch {
-            print("Error en ping/online: \(error)")
-        }
-    }
-
-    @MainActor
-    func subirEstadoEmocional(animo: String, estres: String) async -> Bool {
-        guard let myRole = role else { return false }
-
-        do {
-            let url = baseURL.appendingPathComponent("estado")
-            var request = URLRequest(url: url)
-            request.httpMethod = "POST"
-            request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
-
-            let body: [String: String] = [
-                "usuario": myRole,
-                "animo": animo,
-                "estres": estres
-            ]
-            request.httpBody = try JSONEncoder().encode(body)
-
-            let (_, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse,
-                  (200...299).contains(http.statusCode) else {
-                return false
-            }
-            return true
-        } catch {
-            print("Error subiendo estado: \(error)")
-            return false
-        }
-    }
-}
-            reqPing.setValue(myRole, forHTTPHeaderField: "X-Usuario")
-            _ = try? await URLSession.shared.data(for: reqPing)
-
-            // 2. Preguntar si el otro está online
-            let urlOnline = baseURL.appendingPathComponent("online/\(otroRol)")
-            let (data, _) = try await URLSession.shared.data(from: urlOnline)
-            let status = try JSONDecoder().decode(StatusOnline.self, from: data)
-
-            // Actualizamos la variable de estado
-            estaOnlineOtroUsuario = status.online
         } catch {
             print("Error en ping/online: \(error)")
         }
